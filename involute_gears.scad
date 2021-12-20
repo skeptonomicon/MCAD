@@ -317,18 +317,22 @@ module gear (
     circle_diameter=undef,
     backlash=0,
     twist=0,
-    involute_facets=0,
-    tooth_facets=0,
+    involute_facets=undef,
+    tooth_facets=undef,
     flat=false)
 {
-    // Check for undefined circular pitch (happens when neither circular_pitch or diametral_pitch are specified)
-    if (circular_pitch==undef)
+    centered_gear = (flat == true)? true : centered_gear;
+    centered_hub = (flat == true)? true : centered_hub;
+   
+    // Check for undefined pitch (happens when neither circular_pitch or diametral_pitch are specified)
+    if (circular_pitch==undef && diametral_pitch == undef)
         echo("MCAD ERROR: gear module needs either a diametral_pitch or circular_pitch");
 
     //Convert diametrial pitch to our native circular pitch
     circular_pitch = (circular_pitch!=undef?circular_pitch:pi/diametral_pitch);
     diametral_pitch = pi/circular_pitch;
     module_pitch = circular_pitch/pi;
+
     
     // Pitch diameter: Diameter of pitch circle.
     pitch_diameter  =  number_of_teeth * circular_pitch / pi;
@@ -340,9 +344,6 @@ module gear (
     // Base Circle
     base_radius = pitch_radius*cos(pressure_angle);
 
-    echo (str("Gear Type: ", tooth_profile, "Teeth: ", number_of_teeth, ", Modulus: ", module_pitch, " Pitch Radius: ", pitch_radius, ", Clearance: ", clearance));
-    echo (str("Root Radius: ", root_radius,", Outer Radius: ", outer_radius,", Describing Radius: ", describing_radius,", Half Thck Ang: ", half_thick_angle));
-    
     // Addendum and dedendum are set by tooth height if specified, otherwise use ISO or JIS standard for involute gears
     // addendum is height of tooth above pitch circle, dedendum is releif below pitch circle
     // Calculate default clearance if not specified
@@ -361,18 +362,21 @@ module gear (
     half_thick_angle = (360 / number_of_teeth - backlash_angle) / 4;
 
     // Variables controlling the rim.
-    rim_thickness = (rim_thickness!=undef?(rim_thickness!=0?rim_thickness:gear_thickness):gear_thickness * 1.5);
+    rim_thickness = (flat==true || rim_thickness == undef || rim_thickness == 0)? gear_thickness : rim_thickness;
+    //rim_thickness = (rim_thickness!=undef?(rim_thickness!=0?rim_thickness:gear_thickness):gear_thickness * 1.5);
     rim_width = (rim_width!=undef?rim_width:root_radius * .1);
     rim_radius = root_radius - rim_width;
 
     // Variables controlling the hub
-    hub_thickness = (hub_thickness!=undef?(hub_thickness!=0?hub_thickness:gear_thickness):gear_thickness * 2);
+    hub_thickness = (flat == true)? gear_thickness : (hub_thickness==undef || hub_thickness ==0)? gear_thickness * 2 : hub_thickness;
+    //hub_thickness = (hub_thickness!=undef?(hub_thickness!=0?hub_thickness:gear_thickness):gear_thickness * 2);
     hub_diameter = (hub_diameter!=undef?hub_diameter:root_radius * .3);
-    hub_base = (centered_hub == false)? 0 : rim_thickness/2 - hub_thickness/2;
+    hub_base = (centered_hub == false || flat == true)? 0 : rim_thickness/2 - hub_thickness/2;
 
     // Variables controlling the spokes
     spokes = spokes == undef? 0 : spokes;
-    spoke_thickness = (spoke_thickness == undef)? rim_thickness : spoke_thickness;
+    spoke_square = (flat == true)? true : spoke_square;
+    spoke_thickness = (flat == true || spoke_thickness == undef)? rim_thickness : spoke_thickness;
     spoke_width = (spokes==0)? 1 : (spoke_width == undef)?  0.75 * pi * hub_diameter / spokes : spoke_width; 
     //spoke_depth is depth spoke must penetrate into hub to ensure complete penetration
     spoke_depth = ((hub_diameter/2)^2-(spoke_width/2)^2)^0.5 +.01;
@@ -395,7 +399,13 @@ module gear (
         (rim_radius+hub_diameter/2)*0.9);
     circle_diameter=(circle_diameter != undef)? circle_diameter : circle_default_diameter;
     //echo(str("cir_orb_dia: ", circle_orbit_diameter, ", cir_orb_circumf: ", circle_orbit_curcumference, ", default cir dia: ",circle_default_diameter, ", cir_dia:",circle_diameter));
-
+    tooth_facets =(tooth_facets!=undef)? tooth_facets: ((involute_facets!=undef)? involute_facets : 10);
+    
+    
+    echo (str("Gear Type: ", tooth_profile, ", Teeth: ", number_of_teeth, ", Modulus: ", module_pitch, ", Pitch Radius: ", pitch_radius, ", Clearance: ", clearance));
+    echo (str("Rim Thicknesses: ", rim_thickness, ", Body Thickness: ", gear_thickness, ", hub_thickness: ", hub_thickness, ", hub_diameter: ", hub_diameter, ", bore_diameter: ", bore_diameter, ", flat: ", flat));
+    echo (str("Root Radius: ", root_radius,", Outer Radius: ", outer_radius,", Describing Radius: ", describing_radius,", Half Thck Ang: ", half_thick_angle));
+    
 
     difference()
     {
@@ -414,15 +424,21 @@ module gear (
                     outer_radius = outer_radius,
                     describing_radius = describing_radius,
                     half_thick_angle = half_thick_angle,
-                    involute_facets=involute_facets,
+                    involute_facets=tooth_facets,
                     tooth_facets=tooth_facets);
 
-                //if we have a 0 hub thickness, then hub must be removed
-                if (hub_thickness == 0)
-                    translate ([0,0,-1])
-                    cylinder (r=rim_radius,h=rim_thickness+2);
+                //if we have a 0 gear thickness, then gear body must be removed
+                if (gear_thickness == 0) {
+                    if (flat == true){
+                        circle (r=rim_radius);
+                    }
+                    else {
+                        translate ([0,0,-1])
+                        cylinder (r=rim_radius,h=rim_thickness+2);
+                    }
+                }
                 //if the rim is thicker than the gear, carve out gear body
-                else if (rim_thickness>gear_thickness){
+                else if (flat == false && rim_thickness>gear_thickness){
                     //if not centered, carve out only the top
                     if (centered_gear == false){
                         translate ([0,0,gear_thickness])
@@ -441,8 +457,8 @@ module gear (
                 }
             }
             
-            //extend the gear body if gear_thickness > rim_thickness unless spoked, 
-            if (gear_thickness > rim_thickness)
+            //extend the gear body if gear_thickness > rim_thickness 
+            if (flat == false && gear_thickness > rim_thickness)
             {
                 if (centered_gear == false)
                 {
@@ -465,26 +481,35 @@ module gear (
             //add in spokes
             if (spokes>0)
             {          
-                for(i=[0:spokes-1])
-                    translate([0,0,rim_thickness/2])
-                    rotate([90,0,i*360/spokes])
-                    translate([0,0,spoke_radius])
-                    {
-                        if (spoke_square==true){
-                             resize([spoke_width,spoke_thickness,spoke_length])
-                            translate([0,0,.5])
-                            cube(1,center=true);
-                        }
-                        if (spoke_square==false){
-                            resize([spoke_width,spoke_thickness,spoke_length])
-                            cylinder(h=10,d=10);
+                for(i=[0:spokes-1]){
+                    if (flat == true){
+                        rotate([0,0,i*360/spokes])
+                        {
+                            translate([spoke_radius + spoke_length/2.0,0,0])
+                            square([spoke_length,spoke_width],center=true);
                         }
                     }
+                    else {
+                        translate([0,0,rim_thickness/2])
+                        rotate([90,0,i*360/spokes])
+                        translate([0,0,spoke_radius])
+                        {
+                            if (spoke_square==true){
+                                resize([spoke_width,spoke_thickness,spoke_length])
+                                translate([0,0,.5])
+                                cube(1,center=true);
+                            }
+                            if (spoke_square==false){
+                                resize([spoke_width,spoke_thickness,spoke_length])
+                                cylinder(h=10,d=10);
+                            }
+                        }
+                    }
+                }
             }
         }
-        
         //remove the center bore
-        translate ([0,0,-1])
+        translate ([0,0,(flat == true)? 0 : hub_base -1])
         linear_extrude_flat_option(flat =flat, height=2+max(rim_thickness,hub_thickness,gear_thickness))
         circle (r=bore_diameter/2);
         
